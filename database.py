@@ -3,7 +3,8 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.orm import Session # Імпортуємо для коректного типу в get_db
 
 # Підключення до PostgreSQL
-engine = create_engine("postgresql://postgres:1234@localhost:5432/users_db", echo=True)
+# engine = create_engine("postgresql://postgres:1234@localhost:5432/users_db", echo=True)
+engine = create_engine("postgresql://postgres:1234@localhost:5434/users_db", echo=True)
 Base = declarative_base()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -1,8 +1,16 @@
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+import datetime as dt
 import jwt
 import secrets
 import os
+import dotenv
+
+from jwt.exceptions import InvalidTokenError
+from fastapi import HTTPException, status
+
+from entities import Token, TokenData
+
+dotenv.load_dotenv()
 
 # Секретний ключ для JWT
 # Рекомендовано використовувати змінну середовища у реальних додатках
@@ -27,23 +35,31 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(user_id: int, minutes: int = 30) -> str:
     """Створює токен доступу JWT із ID користувача та терміном дії."""
     payload = {
-        "user_id": user_id,
-        "exp": datetime.utcnow() + timedelta(minutes=minutes)
+        "sub": str(user_id),
+        "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=minutes)
     }
+
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 # Декодування токена
-def decode_token(token: str):
+def decode_token(token: str) -> TokenData:
     """Декодує токен та повертає корисне навантаження, або None у разі помилки."""
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
     try:
-        # Видаляємо префікс 'Bearer ' якщо він присутній (хоча FastAPI це зазвичай робить сам)
-        if token.startswith("Bearer "):
-            token = token[7:]
-            
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        print("Token has expired")
-        return None
-    except jwt.InvalidTokenError:
-        print("Invalid token structure or signature")
-        return None
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_signature": True})
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+        user_id = int(user_id)
+
+        token_data = TokenData(user_id=user_id)
+    except InvalidTokenError:
+        raise credentials_exception
+
+    return token_data

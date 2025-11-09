@@ -1,11 +1,15 @@
-from fastapi import FastAPI, HTTPException, Body, Header, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Body, Header, Depends, status
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from database import Session as DBSession, engine, User, Expense
 from auth import hash_password, verify_password, create_access_token, decode_token
 from typing import List, Dict, Any
+from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
+from typing import Annotated
 
+from entities import TokenData
 
+bearer_scheme = HTTPBearer()
 app = FastAPI()
 
 CATEGORIES = ["Groceries", "Leisure", "Electronics", "Utilities", "Clothing", "Health", "Others"]
@@ -42,10 +46,10 @@ class ExpenseResponse(BaseModel):
     category: str
     date: str
     description: str
-    
-    class Config:
-        # Дозволяє FastAPI читати дані з SQLAlchemy моделі
-        from_attributes = True
+
+    model_config = ConfigDict(
+        from_attributes=True  # раньше было orm_mode = True
+    )
 
 # ---------------- Register ----------------
 @app.post("/register")
@@ -83,17 +87,17 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
 @app.post("/expenses", response_model=ExpenseResponse) # Використовуємо response_model
 def add_expense(
     expense_data: ExpenseCreate, # ВИКОРИСТОВУЄМО ОДИН ОБ'ЄКТ PYDANTIC
-    authorization: str = Header(...),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db)
 ):
     """Додає нову витрату для аутентифікованого користувача."""
-    
-    # 1. Аутентифікація
-    token_data = decode_token(authorization)
-    if not token_data or "user_id" not in token_data:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    token = credentials.credentials
 
-    user_id = token_data["user_id"]
+    # 1. Аутентифікація
+    token_data: TokenData = decode_token(token)
+    # if token was invalid exception will already raise
+
+    user_id = token_data.user_id
 
     # 2. Перевірка валідності категорії
     if expense_data.category not in CATEGORIES:
@@ -114,6 +118,7 @@ def add_expense(
         db.commit()
         db.refresh(new_expense)
     except Exception as e:
+        print("error:", e)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error when adding expense: {str(e)}")
 
@@ -123,15 +128,17 @@ def add_expense(
 
 # ---------------- Get Expenses ----------------
 @app.get("/expenses", response_model=List[ExpenseResponse])
-def get_expenses(authorization: str = Header(...), db: Session = Depends(get_db)):
+def get_expenses(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme), db: Session = Depends(get_db)):
     """Отримує список усіх витрат для аутентифікованого користувача."""
-    token_data = decode_token(authorization)
-    if not token_data or "user_id" not in token_data:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    token = credentials.credentials
 
-    user_id = token_data["user_id"]
+    # 1. Аутентифікація
+    token_data: TokenData = decode_token(token)
+    # if token was invalid exception will already raise
+
+    user_id = token_data.user_id
 
     # Отримання витрат із бази даних
     expenses = db.query(Expense).filter_by(user_id=user_id).all()
-    
+
     return expenses
